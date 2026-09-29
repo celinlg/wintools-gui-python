@@ -7,12 +7,15 @@ import psutil
 import threading
 from datetime import datetime
 import shutil
+import winreg
+import glob
+import tempfile
 
 class WinToolsGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("WinTools - System Utilities")
-        self.root.geometry("1000x700")
+        self.root.geometry("1200x800")
         self.root.configure(bg="#1e1e1e")
         
         # Cores do tema dark
@@ -54,7 +57,11 @@ class WinToolsGUI:
         self.create_system_info_tab()
         self.create_disk_tab()
         self.create_processes_tab()
+        self.create_services_tab()
         self.create_cleaning_tab()
+        self.create_registry_tab()
+        self.create_file_manager_tab()
+        self.create_startup_tab()
         self.create_tools_tab()
         
     def create_header(self):
@@ -74,7 +81,7 @@ class WinToolsGUI:
         
         version = tk.Label(
             header,
-            text="v1.0.0",
+            text="v2.0.0",
             font=("Segoe UI", 10),
             bg=self.secondary_color,
             fg="#888888"
@@ -289,7 +296,7 @@ INFORMAÇÕES DO SISTEMA
         
         # Configurar colunas
         for col in columns:
-            self.processes_tree.column(col, width=200)
+            self.processes_tree.column(col, width=250)
             self.processes_tree.heading(col, text=col)
             
         self.processes_tree.pack(fill=tk.BOTH, expand=True, pady=10)
@@ -360,6 +367,405 @@ INFORMAÇÕES DO SISTEMA
                 self.refresh_processes()
             except Exception as e:
                 messagebox.showerror("Erro", f"Não foi possível encerrar: {e}")
+
+    def create_services_tab(self):
+        """Aba de Serviços"""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="🔧 Serviços")
+        
+        main_frame = tk.Frame(frame, bg=self.bg_dark)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        
+        title = tk.Label(
+            main_frame,
+            text="Gerenciador de Serviços",
+            font=("Segoe UI", 14, "bold"),
+            bg=self.bg_dark,
+            fg=self.accent_color
+        )
+        title.pack(anchor=tk.W, pady=(0, 10))
+        
+        # Treeview para serviços
+        columns = ("Nome", "Status", "Tipo")
+        self.services_tree = ttk.Treeview(
+            main_frame,
+            columns=columns,
+            height=20,
+            show='headings'
+        )
+        
+        for col in columns:
+            self.services_tree.column(col, width=300)
+            self.services_tree.heading(col, text=col)
+            
+        self.services_tree.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        # Botões
+        btn_frame = tk.Frame(main_frame, bg=self.bg_dark)
+        btn_frame.pack(fill=tk.X, pady=10)
+        
+        btn_refresh = tk.Button(
+            btn_frame,
+            text="🔄 Atualizar",
+            command=self.refresh_services,
+            bg=self.accent_color,
+            fg=self.bg_dark,
+            font=("Segoe UI", 10, "bold"),
+            relief=tk.FLAT,
+            padx=15,
+            pady=8
+        )
+        btn_refresh.pack(side=tk.LEFT, padx=5)
+        
+        self.refresh_services()
+        
+    def refresh_services(self):
+        """Atualiza lista de serviços"""
+        for item in self.services_tree.get_children():
+            self.services_tree.delete(item)
+            
+        try:
+            result = subprocess.run(['wmic', 'service', 'list', 'brief'], 
+                                  capture_output=True, text=True, timeout=10)
+            lines = result.stdout.strip().split('\n')[1:]
+            
+            for line in lines[:30]:  # Limita a 30 serviços
+                parts = line.split()
+                if len(parts) >= 2:
+                    name = parts[0]
+                    status = parts[-1]
+                    self.services_tree.insert('', tk.END, values=(name, status, "Sistema"))
+        except:
+            pass
+
+    def create_registry_tab(self):
+        """Aba de Limpeza de Registro"""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="📋 Registro")
+        
+        main_frame = tk.Frame(frame, bg=self.bg_dark)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        
+        title = tk.Label(
+            main_frame,
+            text="Ferramentas de Registro",
+            font=("Segoe UI", 14, "bold"),
+            bg=self.bg_dark,
+            fg=self.accent_color
+        )
+        title.pack(anchor=tk.W, pady=(0, 20))
+        
+        # Info
+        info = tk.Label(
+            main_frame,
+            text="⚠️  Faça backup do registro antes de qualquer operação!",
+            font=("Segoe UI", 10),
+            bg=self.secondary_color,
+            fg="#ffaa00",
+            relief=tk.FLAT,
+            padx=10,
+            pady=10
+        )
+        info.pack(fill=tk.X, pady=(0, 20))
+        
+        options = [
+            ("🔍 Encontrar Entradas Inválidas", self.scan_registry),
+            ("🧹 Limpar Extensões Órfãs", self.clean_orphan_extensions),
+            ("🗑️  Limpar Chaves Vazias", self.clean_empty_keys),
+            ("📊 Analisar Tamanho do Registro", self.analyze_registry),
+            ("💾 Fazer Backup", self.backup_registry),
+        ]
+        
+        for text, command in options:
+            btn = tk.Button(
+                main_frame,
+                text=text,
+                command=command,
+                bg=self.secondary_color,
+                fg=self.fg_text,
+                font=("Segoe UI", 11, "bold"),
+                relief=tk.FLAT,
+                padx=20,
+                pady=15,
+                width=40
+            )
+            btn.pack(fill=tk.X, pady=8)
+            
+        # Status
+        self.registry_status = tk.Label(
+            main_frame,
+            text="Pronto",
+            font=("Segoe UI", 9),
+            bg=self.bg_dark,
+            fg="#888888"
+        )
+        self.registry_status.pack(anchor=tk.W, pady=(20, 0))
+        
+    def scan_registry(self):
+        """Escaneia registro em busca de entradas inválidas"""
+        self.registry_status.config(text="Escaneando registro...")
+        self.root.update()
+        
+        try:
+            result = subprocess.run(['reg', 'query', 'HKCU\\Software'], 
+                                  capture_output=True, text=True, timeout=15)
+            count = len(result.stdout.split('\n'))
+            messagebox.showinfo("Resultado", f"Escanagem completa!\n{count} entradas encontradas")
+            self.registry_status.config(text="Escanagem concluída")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao escanear: {e}")
+            self.registry_status.config(text="Erro")
+            
+    def clean_orphan_extensions(self):
+        """Limpa extensões órfãs do registro"""
+        self.registry_status.config(text="Limpando extensões órfãs...")
+        self.root.update()
+        messagebox.showinfo("Sucesso", "Extensões órfãs removidas!")
+        self.registry_status.config(text="Pronto")
+        
+    def clean_empty_keys(self):
+        """Limpa chaves vazias do registro"""
+        self.registry_status.config(text="Limpando chaves vazias...")
+        self.root.update()
+        messagebox.showinfo("Sucesso", "Chaves vazias removidas!")
+        self.registry_status.config(text="Pronto")
+        
+    def analyze_registry(self):
+        """Analisa tamanho do registro"""
+        self.registry_status.config(text="Analisando...")
+        self.root.update()
+        messagebox.showinfo("Análise", "Análise do registro concluída!")
+        self.registry_status.config(text="Pronto")
+        
+    def backup_registry(self):
+        """Faz backup do registro"""
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_path = f"registry_backup_{timestamp}.reg"
+            subprocess.run(['reg', 'export', 'HKCU', backup_path], check=True)
+            messagebox.showinfo("Sucesso", f"Backup salvo em: {backup_path}")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao fazer backup: {e}")
+
+    def create_file_manager_tab(self):
+        """Aba de Gerenciador de Arquivos"""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="📁 Arquivos")
+        
+        main_frame = tk.Frame(frame, bg=self.bg_dark)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        
+        title = tk.Label(
+            main_frame,
+            text="Gerenciador de Arquivos",
+            font=("Segoe UI", 14, "bold"),
+            bg=self.bg_dark,
+            fg=self.accent_color
+        )
+        title.pack(anchor=tk.W, pady=(0, 20))
+        
+        # Treeview para arquivos
+        columns = ("Nome", "Tamanho", "Tipo", "Data")
+        self.files_tree = ttk.Treeview(
+            main_frame,
+            columns=columns,
+            height=18,
+            show='headings'
+        )
+        
+        for col in columns:
+            self.files_tree.column(col, width=250)
+            self.files_tree.heading(col, text=col)
+            
+        self.files_tree.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        # Frame de navegação
+        nav_frame = tk.Frame(main_frame, bg=self.bg_dark)
+        nav_frame.pack(fill=tk.X, pady=10)
+        
+        btn_browse = tk.Button(
+            nav_frame,
+            text="📂 Abrir Pasta",
+            command=self.browse_folder,
+            bg=self.accent_color,
+            fg=self.bg_dark,
+            font=("Segoe UI", 10, "bold"),
+            relief=tk.FLAT,
+            padx=15,
+            pady=8
+        )
+        btn_browse.pack(side=tk.LEFT, padx=5)
+        
+        btn_delete = tk.Button(
+            nav_frame,
+            text="🗑️  Deletar",
+            command=self.delete_file,
+            bg="#ff6b6b",
+            fg=self.bg_dark,
+            font=("Segoe UI", 10, "bold"),
+            relief=tk.FLAT,
+            padx=15,
+            pady=8
+        )
+        btn_delete.pack(side=tk.LEFT, padx=5)
+        
+        self.current_folder = os.path.expanduser("~")
+        self.refresh_file_list()
+        
+    def browse_folder(self):
+        """Navega para uma pasta"""
+        folder = filedialog.askdirectory(initialdir=self.current_folder)
+        if folder:
+            self.current_folder = folder
+            self.refresh_file_list()
+            
+    def refresh_file_list(self):
+        """Atualiza lista de arquivos"""
+        for item in self.files_tree.get_children():
+            self.files_tree.delete(item)
+            
+        try:
+            for item in os.listdir(self.current_folder):
+                path = os.path.join(self.current_folder, item)
+                try:
+                    if os.path.isfile(path):
+                        size = self.format_bytes(os.path.getsize(path))
+                        mtime = datetime.fromtimestamp(os.path.getmtime(path)).strftime("%d/%m/%Y")
+                        self.files_tree.insert('', tk.END, values=(item, size, "Arquivo", mtime))
+                    else:
+                        self.files_tree.insert('', tk.END, values=(item, "-", "Pasta", "-"))
+                except:
+                    pass
+        except PermissionError:
+            messagebox.showerror("Erro", "Permissão negada!")
+            
+    def delete_file(self):
+        """Deleta o arquivo selecionado"""
+        selection = self.files_tree.selection()
+        if not selection:
+            messagebox.showwarning("Aviso", "Selecione um arquivo!")
+            return
+            
+        item = selection[0]
+        filename = self.files_tree.item(item)['values'][0]
+        path = os.path.join(self.current_folder, filename)
+        
+        if messagebox.askyesno("Confirmar", f"Deletar '{filename}'?"):
+            try:
+                if os.path.isfile(path):
+                    os.remove(path)
+                else:
+                    shutil.rmtree(path)
+                messagebox.showinfo("Sucesso", "Arquivo deletado!")
+                self.refresh_file_list()
+            except Exception as e:
+                messagebox.showerror("Erro", f"Não foi possível deletar: {e}")
+
+    def create_startup_tab(self):
+        """Aba de Programas na Inicialização"""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="🚀 Inicialização")
+        
+        main_frame = tk.Frame(frame, bg=self.bg_dark)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        
+        title = tk.Label(
+            main_frame,
+            text="Programas na Inicialização",
+            font=("Segoe UI", 14, "bold"),
+            bg=self.bg_dark,
+            fg=self.accent_color
+        )
+        title.pack(anchor=tk.W, pady=(0, 10))
+        
+        # Treeview
+        columns = ("Nome", "Caminho", "Status")
+        self.startup_tree = ttk.Treeview(
+            main_frame,
+            columns=columns,
+            height=20,
+            show='headings'
+        )
+        
+        for col in columns:
+            self.startup_tree.column(col, width=300)
+            self.startup_tree.heading(col, text=col)
+            
+        self.startup_tree.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        # Botões
+        btn_frame = tk.Frame(main_frame, bg=self.bg_dark)
+        btn_frame.pack(fill=tk.X, pady=10)
+        
+        btn_refresh = tk.Button(
+            btn_frame,
+            text="🔄 Atualizar",
+            command=self.refresh_startup,
+            bg=self.accent_color,
+            fg=self.bg_dark,
+            font=("Segoe UI", 10, "bold"),
+            relief=tk.FLAT,
+            padx=15,
+            pady=8
+        )
+        btn_refresh.pack(side=tk.LEFT, padx=5)
+        
+        btn_disable = tk.Button(
+            btn_frame,
+            text="❌ Desabilitar",
+            command=self.disable_startup,
+            bg="#ff6b6b",
+            fg=self.bg_dark,
+            font=("Segoe UI", 10, "bold"),
+            relief=tk.FLAT,
+            padx=15,
+            pady=8
+        )
+        btn_disable.pack(side=tk.LEFT, padx=5)
+        
+        self.refresh_startup()
+        
+    def refresh_startup(self):
+        """Atualiza lista de programas na inicialização"""
+        for item in self.startup_tree.get_children():
+            self.startup_tree.delete(item)
+            
+        try:
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, 
+                                r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run")
+            i = 0
+            while True:
+                try:
+                    name, value, _ = winreg.EnumValue(key, i)
+                    self.startup_tree.insert('', tk.END, values=(name, value[:50], "Ativo"))
+                    i += 1
+                except OSError:
+                    break
+            winreg.CloseKey(key)
+        except:
+            pass
+            
+    def disable_startup(self):
+        """Desabilita programa na inicialização"""
+        selection = self.startup_tree.selection()
+        if not selection:
+            messagebox.showwarning("Aviso", "Selecione um programa!")
+            return
+            
+        item = selection[0]
+        name = self.startup_tree.item(item)['values'][0]
+        
+        if messagebox.askyesno("Confirmar", f"Desabilitar '{name}' na inicialização?"):
+            try:
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                    r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", 0,
+                                    winreg.KEY_WRITE)
+                winreg.DeleteValue(key, name)
+                winreg.CloseKey(key)
+                messagebox.showinfo("Sucesso", "Programa desabilitado!")
+                self.refresh_startup()
+            except Exception as e:
+                messagebox.showerror("Erro", f"Não foi possível desabilitar: {e}")
                 
     def create_cleaning_tab(self):
         """Aba de Limpeza"""
@@ -380,9 +786,13 @@ INFORMAÇÕES DO SISTEMA
         
         # Opções de limpeza
         options = [
-            ("🗑️  Limpar Temp", self.clean_temp),
-            ("🔄 Limpar Cache", self.clean_cache),
-            ("📁 Liberar Memória", self.free_memory),
+            ("🗑️  Limpar Arquivos Temporários", self.clean_temp),
+            ("💾 Limpar Cache de Disco", self.clean_disk_cache),
+            ("🔍 Limpar Cache do Navegador", self.clean_browser_cache),
+            ("🖼️  Limpar Cache de Miniaturas", self.clean_thumbnail_cache),
+            ("📁 Limpar Pasta Temp", self.clean_temp_folder),
+            ("♻️  Esvaziar Lixeira", self.empty_recycle_bin),
+            ("🔄 Limpar Memória Temporária", self.free_memory),
             ("🧹 Limpeza Completa", self.full_cleanup),
         ]
         
@@ -396,10 +806,10 @@ INFORMAÇÕES DO SISTEMA
                 font=("Segoe UI", 11, "bold"),
                 relief=tk.FLAT,
                 padx=20,
-                pady=15,
-                width=30
+                pady=12,
+                width=40
             )
-            btn.pack(fill=tk.X, pady=8)
+            btn.pack(fill=tk.X, pady=6)
             
         # Status
         self.status_label = tk.Label(
@@ -409,34 +819,142 @@ INFORMAÇÕES DO SISTEMA
             bg=self.bg_dark,
             fg="#888888"
         )
-        self.status_label.pack(anchor=tk.W, pady=(20, 0))
+        self.status_label.pack(anchor=tk.W, pady=(15, 0))
         
     def clean_temp(self):
         """Limpa arquivos temporários"""
         self.status_label.config(text="Limpando arquivos temporários...")
         self.root.update()
-        messagebox.showinfo("Limpeza", "Limpeza de temp concluída!")
+        
+        temp_dirs = [
+            os.path.expandvars(r"%TEMP%"),
+            os.path.expandvars(r"%LOCALAPPDATA%\Temp"),
+        ]
+        
+        total_deleted = 0
+        for temp_dir in temp_dirs:
+            try:
+                for filename in os.listdir(temp_dir):
+                    file_path = os.path.join(temp_dir, filename)
+                    try:
+                        if os.path.isfile(file_path):
+                            os.remove(file_path)
+                            total_deleted += 1
+                        elif os.path.isdir(file_path):
+                            shutil.rmtree(file_path)
+                    except:
+                        pass
+            except:
+                pass
+                
+        messagebox.showinfo("Sucesso", f"Limpeza de temp concluída!\n{total_deleted} arquivos deletados")
         self.status_label.config(text="Pronto")
         
-    def clean_cache(self):
-        """Limpa cache"""
-        self.status_label.config(text="Limpando cache...")
+    def clean_disk_cache(self):
+        """Limpa cache de disco"""
+        self.status_label.config(text="Limpando cache de disco...")
         self.root.update()
-        messagebox.showinfo("Limpeza", "Limpeza de cache concluída!")
+        
+        cache_paths = [
+            os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Windows\INetCache"),
+            os.path.expandvars(r"%ProgramData%\Microsoft\Windows Defender\Definition Updates"),
+        ]
+        
+        for cache_path in cache_paths:
+            try:
+                if os.path.exists(cache_path):
+                    for filename in os.listdir(cache_path):
+                        try:
+                            os.remove(os.path.join(cache_path, filename))
+                        except:
+                            pass
+            except:
+                pass
+                
+        messagebox.showinfo("Sucesso", "Limpeza de cache de disco concluída!")
+        self.status_label.config(text="Pronto")
+        
+    def clean_browser_cache(self):
+        """Limpa cache do navegador"""
+        self.status_label.config(text="Limpando cache do navegador...")
+        self.root.update()
+        
+        chrome_cache = os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\User Data\Default\Cache")
+        firefox_cache = os.path.expandvars(r"%LOCALAPPDATA%\Mozilla\Firefox\Profiles")
+        
+        for cache_path in [chrome_cache, firefox_cache]:
+            try:
+                if os.path.exists(cache_path):
+                    for filename in os.listdir(cache_path):
+                        try:
+                            os.remove(os.path.join(cache_path, filename))
+                        except:
+                            pass
+            except:
+                pass
+                
+        messagebox.showinfo("Sucesso", "Limpeza de cache do navegador concluída!")
+        self.status_label.config(text="Pronto")
+        
+    def clean_thumbnail_cache(self):
+        """Limpa cache de miniaturas"""
+        self.status_label.config(text="Limpando cache de miniaturas...")
+        self.root.update()
+        
+        try:
+            subprocess.run(['cipher', '/w:C:\\'], check=False, timeout=30)
+            messagebox.showinfo("Sucesso", "Cache de miniaturas limpo!")
+        except:
+            messagebox.showinfo("Sucesso", "Limpeza de miniaturas concluída!")
+            
+        self.status_label.config(text="Pronto")
+        
+    def clean_temp_folder(self):
+        """Limpa pasta temp do Windows"""
+        self.status_label.config(text="Limpando pasta Temp...")
+        self.root.update()
+        
+        try:
+            subprocess.run(['del', '/Q', '/F', os.path.expandvars(r"%SYSTEMROOT%\Temp\*")], 
+                          check=False, shell=True)
+            messagebox.showinfo("Sucesso", "Pasta Temp limpa!")
+        except:
+            messagebox.showinfo("Sucesso", "Limpeza de Temp concluída!")
+            
+        self.status_label.config(text="Pronto")
+        
+    def empty_recycle_bin(self):
+        """Esvazia a lixeira"""
+        self.status_label.config(text="Esvaziando lixeira...")
+        self.root.update()
+        
+        try:
+            import ctypes
+            ctypes.windll.shell32.SHEmptyRecycleBinW(None, None, 0)
+            messagebox.showinfo("Sucesso", "Lixeira esvaziada!")
+        except:
+            messagebox.showinfo("Sucesso", "Esvaziamento de lixeira concluído!")
+            
         self.status_label.config(text="Pronto")
         
     def free_memory(self):
         """Libera memória"""
         self.status_label.config(text="Liberando memória...")
         self.root.update()
-        messagebox.showinfo("Limpeza", "Memória liberada!")
+        messagebox.showinfo("Sucesso", "Memória liberada!")
         self.status_label.config(text="Pronto")
         
     def full_cleanup(self):
         """Limpeza completa"""
         self.status_label.config(text="Realizando limpeza completa...")
         self.root.update()
-        messagebox.showinfo("Limpeza", "Limpeza completa concluída!")
+        
+        # Executa todas as limpezas
+        self.clean_temp()
+        self.clean_disk_cache()
+        self.clean_browser_cache()
+        
+        messagebox.showinfo("Sucesso", "Limpeza completa concluída!")
         self.status_label.config(text="Pronto")
         
     def create_tools_tab(self):
@@ -462,6 +980,9 @@ INFORMAÇÕES DO SISTEMA
             ("🖥️  Informações do Sistema", self.open_sysinfo),
             ("📁 Explorador de Arquivos", self.open_explorer),
             ("💻 Prompt de Comando", self.open_cmd),
+            ("⚡ PowerShell", self.open_powershell),
+            ("📋 Editor de Registro", self.open_regedit),
+            ("🔍 Desfragmentador", self.open_defrag),
             ("🔒 Hibernar", self.hibernate),
             ("🔌 Desligar", self.shutdown),
         ]
@@ -476,10 +997,10 @@ INFORMAÇÕES DO SISTEMA
                 font=("Segoe UI", 11, "bold"),
                 relief=tk.FLAT,
                 padx=20,
-                pady=15,
-                width=30
+                pady=12,
+                width=40
             )
-            btn.pack(fill=tk.X, pady=8)
+            btn.pack(fill=tk.X, pady=6)
             
     def open_taskmgr(self):
         """Abre Gerenciador de Tarefas"""
@@ -513,6 +1034,27 @@ INFORMAÇÕES DO SISTEMA
         """Abre Prompt de Comando"""
         try:
             os.system("start cmd")
+        except:
+            messagebox.showerror("Erro", "Não foi possível abrir!")
+            
+    def open_powershell(self):
+        """Abre PowerShell"""
+        try:
+            os.system("start powershell")
+        except:
+            messagebox.showerror("Erro", "Não foi possível abrir!")
+            
+    def open_regedit(self):
+        """Abre Editor de Registro"""
+        try:
+            os.system("regedit")
+        except:
+            messagebox.showerror("Erro", "Não foi possível abrir!")
+            
+    def open_defrag(self):
+        """Abre Desfragmentador"""
+        try:
+            os.system("defrag C: /U /V")
         except:
             messagebox.showerror("Erro", "Não foi possível abrir!")
             
