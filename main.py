@@ -386,7 +386,7 @@ INFORMAÇÕES DO SISTEMA
         title.pack(anchor=tk.W, pady=(0, 10))
         
         # Treeview para serviços
-        columns = ("Nome", "Status", "Tipo")
+        columns = ("Nome", "Status", "Tipo", "PID")
         self.services_tree = ttk.Treeview(
             main_frame,
             columns=columns,
@@ -395,7 +395,7 @@ INFORMAÇÕES DO SISTEMA
         )
         
         for col in columns:
-            self.services_tree.column(col, width=300)
+            self.services_tree.column(col, width=280)
             self.services_tree.heading(col, text=col)
             
         self.services_tree.pack(fill=tk.BOTH, expand=True, pady=10)
@@ -417,6 +417,32 @@ INFORMAÇÕES DO SISTEMA
         )
         btn_refresh.pack(side=tk.LEFT, padx=5)
         
+        btn_start = tk.Button(
+            btn_frame,
+            text="▶️  Iniciar",
+            command=self.start_service,
+            bg="#4CAF50",
+            fg=self.bg_dark,
+            font=("Segoe UI", 10, "bold"),
+            relief=tk.FLAT,
+            padx=15,
+            pady=8
+        )
+        btn_start.pack(side=tk.LEFT, padx=5)
+        
+        btn_stop = tk.Button(
+            btn_frame,
+            text="⏹️  Parar",
+            command=self.stop_service,
+            bg="#ff6b6b",
+            fg=self.bg_dark,
+            font=("Segoe UI", 10, "bold"),
+            relief=tk.FLAT,
+            padx=15,
+            pady=8
+        )
+        btn_stop.pack(side=tk.LEFT, padx=5)
+        
         self.refresh_services()
         
     def refresh_services(self):
@@ -425,18 +451,68 @@ INFORMAÇÕES DO SISTEMA
             self.services_tree.delete(item)
             
         try:
-            result = subprocess.run(['wmic', 'service', 'list', 'brief'], 
-                                  capture_output=True, text=True, timeout=10)
-            lines = result.stdout.strip().split('\n')[1:]
+            # Usa Get-Service do PowerShell para obter serviços
+            result = subprocess.run(
+                ['powershell', '-Command', 'Get-Service | Select-Object Name, Status, ServiceType, @{Name="PID";Expression={$_.ServiceHandle}} | ConvertTo-Csv -NoTypeInformation -Delimiter "|"'],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                encoding='utf-8',
+                errors='ignore'
+            )
             
-            for line in lines[:30]:  # Limita a 30 serviços
-                parts = line.split()
-                if len(parts) >= 2:
-                    name = parts[0]
-                    status = parts[-1]
-                    self.services_tree.insert('', tk.END, values=(name, status, "Sistema"))
-        except:
-            pass
+            lines = result.stdout.strip().split('\n')
+            if len(lines) > 1:
+                # Pula o header
+                for line in lines[1:]:
+                    parts = line.split('|')
+                    if len(parts) >= 3:
+                        name = parts[0].strip('"').strip()
+                        status = parts[1].strip('"').strip()
+                        service_type = parts[2].strip('"').strip()
+                        pid = parts[3].strip('"').strip() if len(parts) > 3 else "N/A"
+                        
+                        if name:
+                            self.services_tree.insert('', tk.END, values=(name, status, service_type, pid))
+        except Exception as e:
+            print(f"Erro ao carregar serviços: {e}")
+            messagebox.showwarning("Aviso", "Erro ao carregar serviços. Execute como administrador.")
+
+    def start_service(self):
+        """Inicia o serviço selecionado"""
+        selection = self.services_tree.selection()
+        if not selection:
+            messagebox.showwarning("Aviso", "Selecione um serviço!")
+            return
+            
+        item = selection[0]
+        service_name = self.services_tree.item(item)['values'][0]
+        
+        if messagebox.askyesno("Confirmar", f"Iniciar serviço '{service_name}'?"):
+            try:
+                subprocess.run(['net', 'start', service_name], check=True, timeout=10)
+                messagebox.showinfo("Sucesso", f"Serviço '{service_name}' iniciado!")
+                self.refresh_services()
+            except Exception as e:
+                messagebox.showerror("Erro", f"Não foi possível iniciar: {e}\nExecute como administrador!")
+
+    def stop_service(self):
+        """Para o serviço selecionado"""
+        selection = self.services_tree.selection()
+        if not selection:
+            messagebox.showwarning("Aviso", "Selecione um serviço!")
+            return
+            
+        item = selection[0]
+        service_name = self.services_tree.item(item)['values'][0]
+        
+        if messagebox.askyesno("Confirmar", f"Parar serviço '{service_name}'?"):
+            try:
+                subprocess.run(['net', 'stop', service_name], check=True, timeout=10)
+                messagebox.showinfo("Sucesso", f"Serviço '{service_name}' parado!")
+                self.refresh_services()
+            except Exception as e:
+                messagebox.showerror("Erro", f"Não foi possível parar: {e}\nExecute como administrador!")
 
     def create_registry_tab(self):
         """Aba de Limpeza de Registro"""
@@ -679,7 +755,7 @@ INFORMAÇÕES DO SISTEMA
         title.pack(anchor=tk.W, pady=(0, 10))
         
         # Treeview
-        columns = ("Nome", "Caminho", "Status")
+        columns = ("Nome", "Caminho", "Tipo")
         self.startup_tree = ttk.Treeview(
             main_frame,
             columns=columns,
@@ -688,7 +764,7 @@ INFORMAÇÕES DO SISTEMA
         )
         
         for col in columns:
-            self.startup_tree.column(col, width=300)
+            self.startup_tree.column(col, width=350)
             self.startup_tree.heading(col, text=col)
             
         self.startup_tree.pack(fill=tk.BOTH, expand=True, pady=10)
@@ -730,6 +806,9 @@ INFORMAÇÕES DO SISTEMA
         for item in self.startup_tree.get_children():
             self.startup_tree.delete(item)
             
+        startup_items = {}
+        
+        # HKEY_LOCAL_MACHINE - Run
         try:
             key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, 
                                 r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run")
@@ -737,13 +816,43 @@ INFORMAÇÕES DO SISTEMA
             while True:
                 try:
                     name, value, _ = winreg.EnumValue(key, i)
-                    self.startup_tree.insert('', tk.END, values=(name, value[:50], "Ativo"))
+                    startup_items[name] = (value, "Sistema")
                     i += 1
                 except OSError:
                     break
             winreg.CloseKey(key)
         except:
             pass
+        
+        # HKEY_CURRENT_USER - Run
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, 
+                                r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run")
+            i = 0
+            while True:
+                try:
+                    name, value, _ = winreg.EnumValue(key, i)
+                    startup_items[name] = (value, "Usuário")
+                    i += 1
+                except OSError:
+                    break
+            winreg.CloseKey(key)
+        except:
+            pass
+        
+        # Pasta Startup
+        try:
+            startup_folder = os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup")
+            if os.path.exists(startup_folder):
+                for item in os.listdir(startup_folder):
+                    startup_items[item] = (os.path.join(startup_folder, item), "Pasta Startup")
+        except:
+            pass
+        
+        # Registrar no Treeview
+        for name, (path, tipo) in sorted(startup_items.items()):
+            display_path = path[:60] + "..." if len(path) > 60 else path
+            self.startup_tree.insert('', tk.END, values=(name, display_path, tipo))
             
     def disable_startup(self):
         """Desabilita programa na inicialização"""
@@ -754,18 +863,32 @@ INFORMAÇÕES DO SISTEMA
             
         item = selection[0]
         name = self.startup_tree.item(item)['values'][0]
+        tipo = self.startup_tree.item(item)['values'][2]
         
         if messagebox.askyesno("Confirmar", f"Desabilitar '{name}' na inicialização?"):
             try:
-                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
-                                    r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", 0,
-                                    winreg.KEY_WRITE)
-                winreg.DeleteValue(key, name)
-                winreg.CloseKey(key)
+                if tipo == "Sistema":
+                    key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                        r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", 0,
+                                        winreg.KEY_WRITE)
+                    winreg.DeleteValue(key, name)
+                    winreg.CloseKey(key)
+                elif tipo == "Usuário":
+                    key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                        r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", 0,
+                                        winreg.KEY_WRITE)
+                    winreg.DeleteValue(key, name)
+                    winreg.CloseKey(key)
+                elif tipo == "Pasta Startup":
+                    startup_folder = os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup")
+                    file_path = os.path.join(startup_folder, name)
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                
                 messagebox.showinfo("Sucesso", "Programa desabilitado!")
                 self.refresh_startup()
             except Exception as e:
-                messagebox.showerror("Erro", f"Não foi possível desabilitar: {e}")
+                messagebox.showerror("Erro", f"Não foi possível desabilitar: {e}\nExecute como administrador!")
                 
     def create_cleaning_tab(self):
         """Aba de Limpeza"""
